@@ -4,7 +4,8 @@ mutable struct AMR
     index
     id
     snt
-    variables
+    entities
+    relations
     embeddings
 end
 
@@ -17,7 +18,8 @@ end
 
 function AMRReader(file)
     amrset = []
-    variables = []
+    entities = []
+    relations = []
     i = 0
     state = open(file);
     while true
@@ -39,12 +41,14 @@ function AMRReader(file)
                     while !isempty(line)
                         line = strip(readline(state))
                         if isempty(line) continue; end
-                        variables = amrdecoder(line, variables)
+                        append!(entities, amrentitydecoder(line))
+                        append!(relations, amrrelationdecoder(line))
                     end
                     index = length(amrset)
-                    amr = AMR(index, id, sent, variables, readembeddings(index))
+                    amr = AMR(index, id, sent, entities, relations, readembeddings(index))
                     push!(amrset, amr)
-                    variables =[]
+                    entities = []
+                    relations= []
                 end
             end
         end
@@ -53,18 +57,50 @@ function AMRReader(file)
 end
 
 
-function amrdecoder(line, variables)
-    #println("line: $line")
-    var1part = findfirst("(",line)
-    var2part = findfirst("/",line)
+function amrentitydecoder(line)
+    vars = []
+    rx = r"/ (.+)"
+    m = match(rx,line)
+    if isnothing(m) return []; end
+
+    varname = m.captures[1]
+    
+    function helperdecode(varname)
+        var1 = varname
+        rest = []
+        if occursin(":",varname)
+           var1 = varname[1:findfirst(" ", varname).start]
+           rest = varname[findfirst(" ", varname).stop:end]
+        end
+        return strip(var1), rest
+    end
+
+    while !isnothing(helperdecode(varname))
+        var, rest= helperdecode(varname)
+        push!(vars, replace(var, ")" => ""))
+        rest = varname
+        rx = r"/ (.+)"
+        m = match(rx,varname)
+        if isnothing(m) break; end
+        varname = m.captures[1]
+    end
+    return vars
+end
+
+
+
+function amrrelationdecoder(line)
+    vars = []
+    var1part = findfirst(":",line)
+    var2part = findfirst("(",line)
     if !isnothing(var1part) && !isnothing(var2part) 
         v1end = var1part[1]
         v2strt = var2part[1]
-        varname = strip(line[v1end+1:v2strt-1])
-        push!(variables, varname)
+        push!(vars, strip(line[v1end+1:v2strt-1]))
     end
-    return variables
+    return vars
 end
+
 
 function readembeddings(index)
     return embeddings[string(index)]

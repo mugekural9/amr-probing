@@ -66,6 +66,16 @@ function pred_tail(h,l)
 end
 
 
+function accuracy_tail(triplets)
+    total_correct =  0
+    for trp in triplets
+        if trp.t == pred_tail(trp.h, trp.l)
+            total_correct +=1
+        end
+    end
+    return total_correct/length(triplets)
+end
+
 g = GraphElements(1024,4,2)
 trp1 = triplet(1, 1, 2)
 trp2 = triplet(2, 2, 3)
@@ -78,12 +88,19 @@ sbatch  =  triplets[1:3]
 crpairs = generate_negatives(sbatch)
 gamma = 0.2
 
-for i in 1:10
-    J = @diff loss_transe(crpairs, gamma)
-    println("loss: $J")
-    for par in params(g)
-        g = grad(J, par)
-        update!(value(par), g, eval(Meta.parse("Adam()")))
+
+function train()
+    local i=0
+    while accuracy_tail(triplets) != 1 # overfit to the graph
+        i +=1
+        J = @diff loss_transe(crpairs, gamma)
+        println("iteration: $i, loss: $J")
+        for par in params(g)
+            g = grad(J, par)
+            update!(value(par), g, eval(Meta.parse("Adam()")))
+        end
     end
 end
+
+train()
 
