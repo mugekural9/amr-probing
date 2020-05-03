@@ -75,12 +75,15 @@ end
 function get_entities_and_relations(dataset)
     all_entities  = []
     all_relations = []
+    all_triplets = []
     all_entities_dict= Dict()  
     all_relations_dict = Dict()  
 
     for amr in dataset.amrset
        append!(all_entities, amr.entities)
        append!(all_relations, amr.relations)
+       append!(all_triplets,  amr.triplets)
+      
     end
 
     for e in all_entities
@@ -95,7 +98,7 @@ function get_entities_and_relations(dataset)
         end
     end
 
-    return all_entities_dict, all_relations_dict
+    return all_entities_dict, all_relations_dict, all_triplets
 end
 
 
