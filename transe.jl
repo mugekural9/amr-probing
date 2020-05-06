@@ -1,5 +1,3 @@
-using Knet, LinearAlgebra
-import Distributions: Uniform 
 include("mrpdata.jl")
 
 _usegpu = gpu()>=0
@@ -13,7 +11,7 @@ function GraphElements(embed_dim::Int, num_entity::Int, num_rel::Int)
     k = 6/sqrt(embed_dim)
     e = param(rand(Uniform(-k, k), (embed_dim, num_entity)), atype=_atype)
     l = param(rand(Uniform(-k, k), (embed_dim, num_rel)), atype=_atype)
-    l = normalize_columns(l)
+    #l = normalize_columns(l)
     GraphElements(e,l)
 end
 
@@ -26,6 +24,14 @@ function normalize_columns(m)
     b = m' * m
     b = b[:,1]
     m = m ./ b'
+    return m
+end
+
+function normalize_columns_v1(m)
+    ## Normalize m column vectors with L1 norm
+    #b = m[:,1]
+    mags = sum(m, dims=1)
+    m = m ./ mags
     return m
 end
 
@@ -45,10 +51,10 @@ function train(data, batchsize, gamma, lr)
     a = Iterators.Stateful(data)
     epoch = 1
     trainloss = 0
-    while true
+    while epoch <1000
+        #g.e = normalize_columns(g.e)
         batch = collect(Iterators.take(a, batchsize))
         if !isempty(batch) 
-            g.e = normalize_columns(g.e)
             ngbatch = generate_negatives(batch)
             J = @diff loss_transe(ngbatch, gamma)
             trainloss += value(J)
@@ -59,14 +65,17 @@ function train(data, batchsize, gamma, lr)
             end
         else ## End of epoch
             a = Iterators.Stateful(data)
+            #trainacc= "-"
             trainacc = accuracy_tail(data); 
+            if trainacc == 1.0
+                return;
+            end
             println("epoch: $epoch, trainloss: $trainloss, trainacc: $trainacc")
             epoch += 1
             trainloss = 0
         end
     end
 end
-
 
 function generate_negatives(sbatch)
     trp_pairs = []
@@ -89,43 +98,36 @@ function pred_tail(h,l)
     trans = h_and_r .- g.e
     norms = []
     for i in 1:size(trans,2)
-       push!(norms,norm(trans[:,i]))
+        if i!=h; push!(norms,norm(trans[:,i])); end
     end
-    return argmin(norms)
+    return argmin(norms) +1
 end
 
 
 function accuracy_tail(triplets)
+    N = length(triplets)
     total_correct =  0
     for trp in triplets
-        if pred_tail(trp.h, trp.l) in ranker10(trp)
+        if trp.t in ranker(trp, 5)
             total_correct +=1
         end
     end
-    return total_correct/length(triplets)
+    println("total_correct: $total_correct, out of $N")
+    return total_correct/N
 end
 
 
-function ranker10(trp)
+function ranker(trp, topk)
     getrankid(rank) = return rank[1]
     getrank(trp) = return norm(g.e[:,trp.h] + g.l[:,trp.l] - g.e[:,trp.t])
     ranks = []
-    for (k,v) in ents
-       ctrp = triplet(ents[k], trp.l, trp.t)
-       push!(ranks, (ents[k],getrank(ctrp)))
-   end
+    for (label, id) in ents
+        if id!=trp.h
+           ctrp = triplet(trp.h, trp.l, id)
+           push!(ranks, (id, getrank(ctrp)))
+        end
+    end
     sortedpreds =sort(ranks, by= x->x[2])
-   return getrankid.(sortedpreds[1:10])
+   return getrankid.(sortedpreds[1:min(length(sortedpreds),topk)])
 end
-
-
-
-ents, rels, trps = get_entities_and_relations(amr_dataset)
-trips = []; rs = Dict()
-for trip in trps; push!(trips, triplet(ents[trip[1]], rels[trip[2]], ents[trip[3]])); end
-for tr in trips; key = string(tr.h, "-", tr.l); if !haskey(rs, key); rs[key]=[];end; push!(rs[key], tr.t); end
-
-g = GraphElements(1024, length(ents), length(rels))
-batchsize = 32; gamma = 1; lr = 0.1
-train(trips, batchsize, gamma, lr)
 
