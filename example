@@ -1,0 +1,128 @@
+## Sent: Pierre Vinken , 61 years old , will join the board as a nonexecutive director Nov. 29 .
+
+
+
+## Alignments:
+# JAMR
+
+{
+    "id": "20001001",
+    "flavor": 2,
+    "framework": "alignment",
+    "version": 1.0,
+    "time": "2019-06-24",
+    "nodes": [
+    {
+        "id": 0,
+        "label": [8]
+    },
+    {
+        "id": 1,
+        "label": [0, 1]
+    },
+    {
+        "id": 2,
+        "label": [0, 1],
+        "properties": ["op1", "op2"],
+        "values": [
+            [0, 1],
+            [0, 1]
+        ]
+    },
+    {
+        "id": 3,
+        "label": [4],
+        "properties": ["quant"],
+        "values": [
+            [3]
+        ]
+    },
+    {
+        "id": 4,
+        "label": [4]
+    },
+    {
+        "id": 5,
+        "label": [10]
+    },
+    {
+        "id": 6,
+        "label": [14]
+    },
+    {
+        "id": 7,
+        "label": [14]
+    },
+    {
+        "id": 9,
+        "properties": ["day"],
+        "values": [
+            [16]
+        ]
+    }]
+}
+
+# ISI
+
+{
+    "id": "20001001",
+    "flavor": 2,
+    "framework": "alignment",
+    "version": 1.0,
+    "time": "2019-06-24",
+    "nodes": [
+    {
+        "id": 0,
+        "label": [8]
+    },
+    {
+        "id": 4,
+        "label": [4]
+    },
+    {
+        "id": 5,
+        "label": [10]
+    },
+    {
+        "id": 7,
+        "label": [14]
+    },
+    {
+        "id": 8,
+        "label": [14],
+        "properties": ["polarity"],
+        "values": [
+            [13]
+        ]
+    },
+    {
+        "id": 2,
+        "properties": ["op1", "op2"],
+        "values": [
+            [0],
+            [1]
+        ]
+    },
+    {
+        "id": 1,
+        "properties": ["age"],
+        "values": [
+            [5]
+        ]
+    },
+    {
+        "id": 3,
+        "properties": ["quant"],
+        "values": [
+            [3]
+        ]
+    },
+    {
+        "id": 9,
+        "properties": ["month", "day"],
+        "values": [
+            [15],
+            [16]
+        ]
+    }]
+}

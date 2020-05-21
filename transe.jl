@@ -1,4 +1,4 @@
-include("mrpdata.jl")
+include("data.jl")
 
 _usegpu = gpu()>=0
 _atype = ifelse(_usegpu, KnetArray{Float32}, Array{Float64})
