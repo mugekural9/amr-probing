@@ -9,43 +9,34 @@ mutable struct AMR
     roots
     wordembeddings
     alignments
-    distances
-    paths
-    adjacents
-    aligned_embeds
-    aligned_nodes
-    aligned_words
-    al
     words
+    al_distances
+    al_embs
+    al
 end
 
-function AMR(id, input, nodes, edges, tops)
+function AMR(id, input, nodes, edges, roots)
     entities = []    
     relations = []
     triplets = []
+    
     for node in nodes
        push!(entities, node["label"])
-    end
-
-    for edge in edges
-       push!(relations, edge["label"])
     end
     
     for edge in edges
         edgelabel = edge["label"]
-        srcid= edge["source"];  
-        srclabel = nodes[srcid+1]["label"]
-        tgtid =  edge["target"];
-        tgtlabel = nodes[tgtid+1]["label"]
-        triplet = (srclabel, edgelabel, tgtlabel)
+        srcid =  edge["source"]
+        tgtid =  edge["target"]
+        triplet = (srcid + 1, edgelabel, tgtid + 1)
         push!(triplets, triplet)
+        push!(relations, edgelabel)
     end
 
-    aligned_embeds = zeros(1024, length(entities))
-    aligned_nodes = []
-    aligned_words = []
-    aligned_nodes_and_words = []
-    AMR(id, input, entities, relations, triplets, tops, Any, Any, Any, Any, Any, aligned_embeds, aligned_nodes, aligned_words, aligned_nodes_and_words, Any)
+    al_distances = []
+    al_embs = []
+    al = []
+    AMR(id, input, entities, relations, triplets, roots, Any, Any, Any, al_distances, al_embs, al)
 end
 
 
@@ -80,7 +71,6 @@ function AMRReader(file, layer)
     amrset = add_alignments(amrset)
     amrset = add_wordembeddings(amrset)
     for (id, amr) in enumerate(amrset)
-        amr = calculate_pairwise_distances(amr)
         embeds = amr.wordembeddings[:,:,layer]
         for align in amr.alignments
             node_id  = align["id"] + 1
@@ -89,12 +79,12 @@ function AMRReader(file, layer)
             elseif haskey(align, "values")
                 wordembed_id = align["values"][1] .+ 1
             end
-            push!(amr.aligned_nodes, node_id)
-            push!(amr.aligned_words, wordembed_id)
             push!(amr.al, (wordembed_id, node_id))
-            #amr.aligned_embeds[:, node_id] =  embeds[:, wordembed_id]
             amr.words = udpipes[amr.id] 
         end
+        amr.al_embs = zeros(1024, length(amr.al))
+        amr = calculate_distances(amr)
+        amr = calc_al_embs(amr)
     end
     AMRReader(file, amrset, length(amrset), layer)
 end
@@ -143,61 +133,6 @@ function add_alignments(amrset)
 end
 
 
-function generate_adjaceny_matrix(amr)
-    adjacents = Dict()
-    paths = []
-    for id in 1:length(amr.entities)
-        adjacents[id] = []
-    end
-    for trp in amr.triplets
-       s, l, t = trp
-       sid = findfirst(isequal(s), amr.entities) 
-       tid = findfirst(isequal(t), amr.entities) 
-       append!(adjacents[sid], tid)
-       append!(adjacents[tid], sid)
-       push!(paths, (sid,tid))
-   end
-   paths  = sort(collect(paths),by=x->x[1])
-   amr.paths = paths 
-   amr.adjacents = adjacents
-   return amr
-end 
-
-
-function calculate_pairwise_distances(amr)
-    amr = generate_adjaceny_matrix(amr)
-    amr.distances = ones(length(amr.entities), length(amr.entities)) * - 1
-    for r in 1:size(amr.distances,1)
-        for c in 1:size(amr.distances,2)
-            dist =  calc_between_nodes(amr,r,c)
-            if !isnothing(dist)
-                amr.distances[r, c] = dist
-                amr.distances[c, r] = dist
-            end
-        end
-    end
-    return amr
-end 
-
-
-function calc_between_nodes(amr, p1, p2)
-    visited = []
-    function helper(dist, src, tgt, visited)
-        if src == tgt; return dist; end
-        for s in amr.adjacents[src] ## Children
-            if s == tgt; return dist+1; end
-        end
-        for s in amr.adjacents[src]
-            if !(s in visited)
-                push!(visited, s)
-                return helper(dist+1, s, tgt, visited)
-            end
-        end
-    end
-    dist = helper(0, p1, p2, visited)
-    return dist
-end
-
 
 function udpipe_reader()
   udpipes = Dict()
@@ -222,4 +157,84 @@ function udpipe_reader()
       end
   end
   return udpipes
+end
+
+
+function calculate_distances(amr)
+    n = length(amr.entities)
+    dicts = []
+
+    for i in 1:n
+        push!(dicts, Dict())
+        for (s, l, t) in amr.triplets
+           if s==i
+               dicts[i][t] = 1
+           elseif t==i
+               dicts[i][s] = 1
+           end
+       end
+       dicts[i][i] = 0
+    end
+
+    function calc(src, tgt)
+        my_adjs = dicts[src]
+        if tgt in keys(my_adjs) return 1; end
+        possible_paths = []
+        for (k,v) in my_adjs
+            for (k2, v2) in dicts[k]
+               if k2==tgt
+                   tgt_dist = v + v2
+                   push!(possible_paths, tgt_dist)
+               end
+           end
+       end
+        my_adjs[tgt] = minimum(possible_paths)
+    end
+
+    for i in 1:n
+        for j in 1:n
+            if i != j
+                calc(i, j)
+            end
+        end
+    end
+
+    v(x) = x[2]
+    all_nodes = collect(1:length(amr.triplets))
+    aligned_nodes = v.(amr.al)
+    deleted_nodes = [] 
+   
+    for node in all_nodes
+        if !(node in aligned_nodes)
+           push!(deleted_nodes, node)
+       end
+    end
+
+    dd = zeros(length(amr.al), length(amr.al))
+    for (j,a) in enumerate(aligned_nodes)
+        i=1
+       for (k,v) in sort(collect(dicts[a]),by=x->x[1])
+           if k in aligned_nodes
+               dd[j,i] = v
+               i+=1
+           end
+       end
+    end
+
+    amr.al_distances = dd
+    return amr
+end
+
+
+function calc_al_embs(amr)
+    embs = amr.wordembeddings[:,:,1]
+    for (i, (labels,r)) in enumerate(amr.al)
+        common = []
+        for l in labels
+            if isempty(common); common = hcat(embs[:,l])
+            else common = hcat(common, embs[:,l]); end
+        end
+        amr.al_embs[:,i] = sum(common, dims=2)
+    end
+    return amr
 end
