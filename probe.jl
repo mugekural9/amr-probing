@@ -20,7 +20,7 @@ end
 
 
 function pred_distance(p, x, y)
-    transformed = mmul(p.w, convert(_atype, x))
+    transformed = mmul(p.w, convert(_atype, x')) # P x T
     maxlength = size(transformed, 2)
     B = 1
     sentlengths = [maxlength]
@@ -33,7 +33,7 @@ function pred_distance(p, x, y)
     squareddists = sum(squareddists, dims=1)  # 1 x T x T x B
     squareddists = reshape(squareddists, (maxlength, maxlength,B)) #  T x T x B
 
-    y = reshape(y, (size(y,1), size(y,2),1))
+    y = reshape(y, (size(y,1), size(y,2),1)) # T x T x 1
     a = abs.(squareddists - convert(_atype, y))
     b = reshape(a, (size(a,1)*size(a,2),B))
     b = sum(b, dims=1)

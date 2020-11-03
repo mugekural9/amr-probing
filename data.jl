@@ -3,7 +3,7 @@ using HDF5, JSON
 mutable struct AMR
     id
     input
-    entities
+    nodes
     relations
     triplets
     roots
@@ -16,14 +16,13 @@ mutable struct AMR
 end
 
 function AMR(id, input, nodes, edges, roots)
-    entities = []    
+    nodes = []    
     relations = []
     triplets = []
     
     for node in nodes
-       push!(entities, node["label"])
+       push!(nodes, node["label"])
     end
-    
     for edge in edges
         edgelabel = edge["label"]
         srcid =  edge["source"]
@@ -36,64 +35,80 @@ function AMR(id, input, nodes, edges, roots)
     al_distances = []
     al_embs = []
     al = []
-    AMR(id, input, entities, relations, triplets, roots, Any, Any, Any, al_distances, al_embs, al)
+    AMR(id, input, nodes, relations, triplets, roots, Any, Any, Any, al_distances, al_embs, al)
 end
-
 
 ## Text Reader
 mutable struct AMRReader
     file::String
-    amrset
+    amrs
     ninstances::Int64
     layer
 end
 
-function AMRReader(file, layer)
-    udpipes = udpipe_reader()
-    amrset = []
+function AMRReader(file)
+    amrs = []
     state = open(file);
+    i=0
     while true
         if eof(state)
             close(state)
             break
         else
-            try
+           try
                 amr_instance = JSON.parse(state)
                 if haskey(amr_instance, "edges")
                     amr = AMR(amr_instance["id"], amr_instance["input"], amr_instance["nodes"], amr_instance["edges"], amr_instance["tops"])
-                    push!(amrset, amr)
+                    push!(amrs, amr)
                 end
             catch
                 @warn "Could not parse state. $state"
             end
         end
     end
-    amrset = add_alignments(amrset)
-    amrset = add_wordembeddings(amrset)
-    for (id, amr) in enumerate(amrset)
-        embeds = amr.wordembeddings[:,:,layer]
-        for align in amr.alignments
-            node_id  = align["id"] + 1
-            if haskey(align, "label")
-                wordembed_id = align["label"] .+ 1
-            elseif haskey(align, "values")
-                wordembed_id = align["values"][1] .+ 1
-            end
-            push!(amr.al, (wordembed_id, node_id))
-            amr.words = udpipes[amr.id] 
-        end
-        amr.al_embs = zeros(1024, length(amr.al))
-        amr = calculate_distances(amr)
-        amr = calc_al_embs(amr)
+    return amrs
+end
+    
+#     amrset = add_wordembeddings(amrset)
+#     for (id, amr) in enumerate(amrset)
+#         embeds = amr.wordembeddings[:,:,layer]
+#         for align in amr.alignments
+#             node_id  = align["id"] + 1
+#             if haskey(align, "label")
+#                 wordembed_id = align["label"] .+ 1
+#             elseif haskey(align, "values")
+#                 wordembed_id = align["values"][1] .+ 1
+#             end
+#             push!(amr.al, (wordembed_id, node_id))
+#             amr.words = udpipes[amr.id] 
+#         end
+#         amr.al_embs = zeros(1024, length(amr.al))
+#         amr = calculate_distances(amr)
+#         amr = calc_al_embs(amr)
+#     end
+#     AMRReader(file, amrset, length(amrset), layer)
+# end
+
+## Main function
+amrs = AMRReader(amr_file) ## 55898 amrs
+alignments = get_alignments(alignment_file) ## 61341 alignments
+embeddings = get_word_embeddings(embeddings_file)
+
+for (i,amr) in enumerate(amrs)
+    amr.wordembeddings = embeddings[string(i-1)]
+end
+
+function get_word_embeddings(embeddings_file)
+    embeddings = h5open(embeddings_file, "r") do file
+        read(file)
     end
-    AMRReader(file, amrset, length(amrset), layer)
+    return embeddings
 end
 
 
-function AMR_AligmentReader(file)
+function get_alignments(alignment_file)
     alignments = Dict()
-    amrset = []
-    state = open(file);
+    state = open(alignment_file);
     while true
         if eof(state)
             close(state)
@@ -107,57 +122,39 @@ function AMR_AligmentReader(file)
             end
         end
     end
-    return alignments
+    return alignments  
 end
 
-function add_wordembeddings(amrset)
-    elmo_embeddings_path= "data/ours/elmo-layers.mrp2019training.amr.wsj.raw.hdf5"
-    elmo_layer_no = 1
-    embeddings = h5open(elmo_embeddings_path, "r") do file
-        read(file)
+
+function append_alignments_to_amrs(amrs, alignments)
+    for amr in amrs
+        if haskey(alignments[amr.id], "nodes")
+            amr.alignments = deepcopy(alignments[amr.id]["nodes"])
+            ## fix index incompatibility
+            for align in amr.alignments
+                align["id"] = align["id"] + 1
+            end
+        end
+   end
+end
+
+
+function append_tokens_to_amrs(amrs)
+    for amr in amrs
+        amr.words = []
+        for aligned_tok in amr.alignments
+            push!(amr.words, aligned_tok["label"])
+        end
     end
-    for (i,amr) in enumerate(amrset)
+end
+
+
+function append_embeddings_to_amrs(amrs, embeddings)
+    for (i,amr) in enumerate(amrs)
        amr.wordembeddings = embeddings[string(i-1)]
     end
-    return amrset
 end
 
-
-function add_alignments(amrset)
-    alignment_file = "data/mrp/2019/companion/jamr.mrp"
-    alignments = AMR_AligmentReader(alignment_file)
-    for amr in amrset
-        amr.alignments = alignments[amr.id]["nodes"]
-    end
-    return amrset
-end
-
-
-
-function udpipe_reader()
-  udpipes = Dict()
-  file = "data/mrp/2019/companion/udpipe.mrp"
-  amrset = []
-  state = open(file);
-  while true
-      if eof(state)
-          close(state)
-          break
-      else
-          try
-            labels = []
-            udpipe_instance = JSON.parse(state)
-            for n in udpipe_instance["nodes"]
-              push!(labels, n["label"])
-            end
-            udpipes[udpipe_instance["id"]] = labels #join(labels," ")
-          catch
-            @warn "Could not parse state. $state"
-          end
-      end
-  end
-  return udpipes
-end
 
 
 function calculate_distances(amr)
@@ -198,7 +195,7 @@ function calculate_distances(amr)
             end
         end
     end
-
+v
     v(x) = x[2]
     all_nodes = collect(1:length(amr.triplets))
     aligned_nodes = v.(amr.al)

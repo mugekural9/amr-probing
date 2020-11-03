@@ -1,9 +1,9 @@
-function report_uuas(preds, dataset)
+function report_uuas(preds, amrs)
     uuas_total = 0
     for (id, pred_distances) in preds
-        amr = dataset[id]
-        n = length(amr.al)
-        gold_edges = union_find(n, pairs_to_distances(amr, amr.al_distances))
+        amr = amrs[id]
+        n = length(amr.nodes)
+        gold_edges = union_find(n, pairs_to_distances(amr, amr.distance_matrix))
         pred_edges = union_find(n, pairs_to_distances(amr, pred_distances))
         uuas_amr = length(findall(in(pred_edges), gold_edges)) / length(gold_edges)
         #println("gold_edges: $gold_edges")
