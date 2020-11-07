@@ -3,9 +3,9 @@ include("train.jl")
 
 using HDF5, JSON
 
-amr_file = "../mrp/2020/cf/training/amr.mrp"
-udpipe_file="../mrp/2020/cf/companion/udpipe.mrp"
-alignment_file="../mrp/2020/cf/companion/jamr.mrp"
+amr_file = "data/mrp/2020/cf/training/amr.mrp"
+udpipe_file="data/mrp/2020/cf/companion/udpipe.mrp"
+alignment_file="data/mrp/2020/cf/companion/jamr.mrp"
 embeddings_file="data/raw.trn.mrp20-amr.elmo-layers.hdf5"
 
  mutable struct AMR
@@ -21,6 +21,7 @@ embeddings_file="data/raw.trn.mrp20-amr.elmo-layers.hdf5"
       alignments
       snt_tokens
       distance_matrix
+      has_missing_alignment
   end
  
  function AMR(id, input, nodes, edges, roots)
@@ -41,7 +42,7 @@ embeddings_file="data/raw.trn.mrp20-amr.elmo-layers.hdf5"
       end
 
       distance_matrix = zeros(length(nodes), length(nodes))
-      AMR(id, input, _nodes, _edges, triplets, roots, Any, Any, Any, Any, Any, distance_matrix)
+      AMR(id, input, _nodes, _edges, triplets, roots, Any, Any, Any, Any, Any, distance_matrix, false)
   end
 
 
@@ -171,12 +172,13 @@ function append_nodeembeddings_to_amrs(amrs)
         try
             calculate_node_embeddings(amr)
         catch
+            amr.has_missing_alignment = true
             println("No alignment is found for ", amr.id)
         end
     end
 end
 
-""" Calculate node embeddings via alignments"""
+""" Calculate node embeddings via alignments and set nodes_to_anchors"""
 function calculate_node_embeddings(amr)
     nodes_to_anchors = Dict()
     for align in amr.alignments
@@ -205,7 +207,11 @@ function calculate_node_embeddings(amr)
             amr.nodeembeddings[node,:] =  amr.nodeembeddings[node,:] + amr.wordembeddings[:,anc]
         end
         # take avg. of word embeddings
-        amr.nodeembeddings[node,:] /= length(anchors) 
+        if length(anchors) != 0 #prevent nan
+            amr.nodeembeddings[node,:] /= length(anchors) 
+        else 
+            amr.has_missing_alignment = true
+        end
     end
 end
 
@@ -255,10 +261,52 @@ function calculate_distance_matrix(amr)
     end
 end
 
+
 function append_distance_matrices(amrs)
     for amr in amrs
         calculate_distance_matrix(amr)
     end
+end
+
+
+function check_missing_alignments(amrs)
+    i = 0
+    fully_aligned_amrs = []
+    for amr in amrs
+        missed = false
+        for nodeid in collect(1:length(amr.nodes))
+           if amr.nodes_to_anchors == Any missed = true; continue; end;
+           if !(nodeid in keys(amr.nodes_to_anchors))
+               missed = true
+           end
+        end
+        if missed 
+            i+=1 
+            amr.has_missing_alignment = true
+        else
+            push!(fully_aligned_amrs,amr)
+        end
+    end
+    #println(i)
+    return fully_aligned_amrs
+end
+
+function check_reentrancy(amrs)
+    i = 0
+    for amr in amrs
+        child_nodes = []
+        has_reentrancy = false
+        for (s,r,t) in amr.triplets
+            if t in child_nodes
+                has_reentrancy = true
+            end
+            push!(child_nodes,t)
+        end
+        if has_reentrancy
+            i +=1
+        end
+     end
+    return i
 end
 
 
@@ -274,7 +322,12 @@ append_wordembeddings_to_amrs(amrs, snt_tokens, embeddings)
 append_nodeembeddings_to_amrs(amrs)
 append_distance_matrices(amrs)
 
+fully_aligned_amrs = check_missing_alignments(amrs)
+trn = Dataset(fully_aligned_amrs[1:19000], 1)
+dev = Dataset(fully_aligned_amrs[19000:20000], 4)
 
 probe = Probe(1024,1024)
-initopt!(probe)
-train(probe, amrs, 100)
+train_distances(20,probe, trn,dev)
+
+
+

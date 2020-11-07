@@ -13,18 +13,20 @@ function Probe(probedim::Int, embeddim::Int)
     Probe(w)
 end
 
-function probe_distance(p, x, y)
-    _, lossm = pred_distance(p, x, y)
+ 
+# probesize -> P x E 
+# batch -> E x T x B 
+function probetransform(probe, batch,  golddistances, masks, amrlengths)
+    _, lossm = pred_distance(probe, batch,  golddistances, masks, amrlengths)
     return lossm
 end
 
 
-function pred_distance(p, x, y)
-    transformed = mmul(p.w, convert(_atype, x')) # P x T
-    maxlength = size(transformed, 2)
-    B = 1
-    sentlengths = [maxlength]
-    transformed = reshape(transformed, (size(transformed,1), maxlength, 1, B)) # P x T x 1 x B
+function pred_distance(probe, batch, golddistances, masks, amrlengths)
+    maxlength = amrlengths[1]
+    B = length(amrlengths)
+    transformed = mmul(probe.w, convert(_atype,batch))    # P x T x B
+    transformed = reshape(transformed, (size(transformed,1),maxlength,1,B)) # P x T x 1 x B
     dummy = convert(_atype, zeros(1,1,maxlength,1))
     transformed = transformed .+ dummy   # P x T x T x B
     transposed = permutedims(transformed, (1,3,2,4))
@@ -32,15 +34,48 @@ function pred_distance(p, x, y)
     squareddists = abs2.(diffs)
     squareddists = sum(squareddists, dims=1)  # 1 x T x T x B
     squareddists = reshape(squareddists, (maxlength, maxlength,B)) #  T x T x B
-
-    y = reshape(y, (size(y,1), size(y,2),1)) # T x T x 1
-    a = abs.(squareddists - convert(_atype, y))
+    squareddists = convert(_atype,masks) .* squareddists
+    
+    a = abs.(squareddists - convert(_atype,golddistances))
     b = reshape(a, (size(a,1)*size(a,2),B))
-    b = sum(b, dims=1)
-    normalized_sent_losses = vec(b)./ convert(_atype, abs2.(sentlengths))
-    batchloss = sum(normalized_sent_losses) /  B
+    b = sum(b,dims=1)
+    normalized_amr_losses = vec(b)./ convert(_atype, abs2.(amrlengths))
+    batchloss = sum(normalized_amr_losses) /  B
     return squareddists, batchloss
 end
+
+
+
+# function probe_distance(p, x, y)
+#     _, lossm = pred_distance(p, x, y)
+#     return lossm
+# end
+
+# function pred_distance(p, x, y)
+#     maxlength = sentlengths[1]
+#     B = length(sentlengths)
+
+#     transformed = mmul(p.w, convert(_atype, x')) # P x T
+#     maxlength = size(transformed, 2)
+#     B = 1
+#     sentlengths = [maxlength]
+#     transformed = reshape(transformed, (size(transformed,1), maxlength, 1, B)) # P x T x 1 x B
+#     dummy = convert(_atype, zeros(1,1,maxlength,1))
+#     transformed = transformed .+ dummy   # P x T x T x B
+#     transposed = permutedims(transformed, (1,3,2,4))
+#     diffs = transformed - transposed
+#     squareddists = abs2.(diffs)
+#     squareddists = sum(squareddists, dims=1)  # 1 x T x T x B
+#     squareddists = reshape(squareddists, (maxlength, maxlength,B)) #  T x T x B
+
+#     y = reshape(y, (size(y,1), size(y,2),1)) # T x T x 1
+#     a = abs.(squareddists - convert(_atype, y))
+#     b = reshape(a, (size(a,1)*size(a,2),B))
+#     b = sum(b, dims=1)
+#     normalized_sent_losses = vec(b)./ convert(_atype, abs2.(sentlengths))
+#     batchloss = sum(normalized_sent_losses) /  B
+#     return squareddists, batchloss
+# end
 
 function mmul(w, x)
     if w == 1 
