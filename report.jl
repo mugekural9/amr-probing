@@ -29,9 +29,12 @@ function report_uuas(preds, amrs)
     for (id, pred_distances) in preds
         amr = amrs[id]
         n = length(amr.nodes)
-        gold_edges = union_find(n, pairs_to_distances(amr, amr.distance_matrix))
-        pred_edges = union_find(n, pairs_to_distances(amr, pred_distances))
-        uuas_amr = length(findall(in(pred_edges), gold_edges)) / length(gold_edges)
+        gold_edges = find_all_direct_edges(amr.distance_matrix)
+        pred_edges =  span_graph(pred_distances) 
+        #gold_edges = union_find(n, pairs_to_distances(amr, amr.distance_matrix))
+        #pred_edges = union_find(n, pairs_to_distances(amr, pred_distances))
+        #uuas_amr = length(findall(in(pred_edges), gold_edges)) / length(gold_edges)
+        uuas_amr = find_overlapping_pairs(pred_edges, gold_edges) / length(gold_edges)
         #println("gold_edges: $gold_edges")
         #println("pred_edges: $pred_edges")
 
@@ -41,6 +44,16 @@ function report_uuas(preds, amrs)
     return uuas_total / length(preds)
 end
 
+function find_overlapping_pairs(pred_edges, gold_edges)
+    overlap=0
+    for i in 1:length(pred_edges)
+        a,b = pred_edges[i]
+        if (a,b) in gold_edges || (b,a) in gold_edges
+            overlap +=1
+        end
+    end
+    return overlap
+end
 
 function pairs_to_distances(amr, distances)
     prs_to_distances =  Dict()
@@ -106,10 +119,9 @@ end
 
 function disconnected_components(distances)
     edges = Dict() 
-    for i in 1:size(distances,1) # it will be square matrix
-           edges[i]= argmin(Array(distances[i,:]))
+    for i in 1:size(distances,1) # it will be square matrix so take dim1
+        edges[i]= argmin(Array(distances[i,:]))
     end
-    
     big_particles = Dict()
     particles = Dict()
     for (k,v) in edges
@@ -118,7 +130,6 @@ function disconnected_components(distances)
         if edges[v] != k
             append!(particle, edges[v])
         end
-
         big_particle = []
         for p in particle
             if !haskey(particles,p)
@@ -127,13 +138,11 @@ function disconnected_components(distances)
                 particles[p] = union(particles[p], particle)
             end        
             big_particle = union(big_particle, particles[p])
-        end
-        
+        end        
         for p in particle
             big_particles[p] = big_particle
         end
     end
-
     groups = Set()
     for v in values(big_particles)
         maxparticle = []
@@ -142,7 +151,39 @@ function disconnected_components(distances)
                 maxparticle= sort(big_particles[j])
            end
         end
-            push!(groups, maxparticle)
+        push!(groups, maxparticle)
     end
     return groups
+end
+
+
+function span_graph(_distances)
+    distances = deepcopy(_distances)
+    for i in 1:size(distances,1)
+        distances[i,i] = 100000000
+    end
+    disc_comps = disconnected_components(distances)
+    missing_edges = Set()
+    for group in disc_comps
+        i = group[1]
+        out = length(group)
+        usual_suspect= sortperm(Array(distances[i,:]))[out]
+        #println("for group $group, usual_suspect: $usual_suspect")
+        for k in sortperm(Array(distances[usual_suspect,:]))
+            if k in group
+                if !((usual_suspect,k) in missing_edges)
+                    push!(missing_edges, (k,usual_suspect))
+                end
+                break
+            end
+        end
+    end
+    
+    for i in 1:size(distances,1) # it will be square matrix so take dim1
+        direct_edge =  (i,argmin(Array(distances[i,:])))
+        if !((argmin(Array(distances[i,:])),i) in missing_edges)
+            push!(missing_edges, direct_edge)
+        end
+    end
+    return collect(missing_edges) #return as array
 end
